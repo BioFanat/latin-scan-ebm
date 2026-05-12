@@ -76,19 +76,27 @@ def _is_consonantal_i(word: str, pos: int) -> bool:
     return has_vowel_before
 
 
-def _is_consonantal_u(word: str, pos: int) -> bool:
-    """Heuristic: is 'u' at position `pos` in `word` consonantal (= v)?
+def _is_consonantal_u(
+    word: str,
+    pos: int,
+    lexicon: VowelLengthLexicon | None = None,
+) -> bool:
+    """Heuristic+dictionary: is 'u' at position `pos` in `word` consonantal (= v)?
 
-    Ported from anceps (word.py:235-242, Allen & Greenough):
-    - After q before a vowel → consonantal (handled by 'qu' digraph)
+    Hard rules (no dictionary needed):
+    - After q before a vowel → consonantal (handled by 'qu' digraph elsewhere)
     - After g before a vowel → consonantal (e.g., "lingua")
     - Word-initial u before a vowel → consonantal (e.g., "uirumque")
-    - Intervocalic u before a vowel → consonantal (e.g., "nouam", "soluit")
+
+    Soft rule (requires lexicon):
+    - Intervocalic u before vowel → consult Morpheus. If Morpheus stores
+      this word's form with 'v' at this position, treat as consonantal.
+      Otherwise treat as vocalic. Disambiguates "uenit/lavinia" (v) from
+      "suus/deus" (u).
     """
     if word[pos] != "u":
         return False
 
-    # After 'q' is handled as digraph — don't double-count
     if pos > 0 and word[pos - 1] == "q":
         return False
 
@@ -96,18 +104,18 @@ def _is_consonantal_u(word: str, pos: int) -> bool:
     if not has_vowel_after:
         return False
 
-    # After 'g' before vowel → consonantal (gu + vowel, e.g., "lingua")
     if pos > 0 and word[pos - 1] == "g":
         return True
 
-    # Word-initial u before vowel → consonantal (= v)
     if pos == 0:
         return True
 
-    # Intervocalic u: disabled for now — too aggressive.
-    # Words like "suus", "tuus" have vocalic u that this would break.
-    # TODO: needs an exception list or dictionary-informed approach.
-
+    # Intervocalic u: do NOT hard-classify here. Even when Morpheus
+    # consistently stores 'v', Pedecerto's gold sometimes scans the
+    # syllable with a vocalic u (e.g., "nouem" 3 syllables in Aen 1.245).
+    # The atomizer keeps intervocalic u as vocalic; adjacent-vowel
+    # SYNIZESIS sites and DIPHTHONG_SPLIT sites give enumerate the
+    # freedom to explore both readings without losing the gold.
     return False
 
 
@@ -157,24 +165,26 @@ def _strip_enclitic(word: str) -> tuple[str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def _tokenize_word(word: str) -> list[tuple[str, bool]]:
+def _tokenize_word(
+    word: str,
+    lexicon: VowelLengthLexicon | None = None,
+) -> list[tuple[str, bool]]:
     """Break a word into phonological units: (char_or_digraph, is_vowel).
 
     Handles digraphs (ch, ph, th, rh, qu), consonantal i, and
     treats x/z as single units (their double-consonant effect is
-    tracked separately).
+    tracked separately). `lexicon` enables dictionary-driven
+    intervocalic consonantal-u detection.
     """
     units: list[tuple[str, bool]] = []
     i = 0
     while i < len(word):
         ch = word[i]
 
-        # Check for digraphs (must check before vowel check)
         digraph_found = False
         if i + 1 < len(word):
             pair = word[i : i + 2]
             if pair in DIGRAPHS:
-                # 'qu': the 'u' is consumed as part of the consonant
                 units.append((pair, False))
                 i += 2
                 digraph_found = True
@@ -182,19 +192,16 @@ def _tokenize_word(word: str) -> list[tuple[str, bool]]:
         if digraph_found:
             continue
 
-        # Consonantal i (= j)
         if _is_consonantal_i(word, i):
             units.append((ch, False))
             i += 1
             continue
 
-        # Consonantal u (= v)
-        if _is_consonantal_u(word, i):
+        if _is_consonantal_u(word, i, lexicon):
             units.append((ch, False))
             i += 1
             continue
 
-        # Regular vowel or consonant
         units.append((ch, _is_vowel(ch)))
         i += 1
 
@@ -222,6 +229,7 @@ def _has_mcl(consonants: str) -> bool:
 
 def _build_line_units(
     words: tuple[str, ...],
+    lexicon: VowelLengthLexicon | None = None,
 ) -> list[tuple[str, bool, int, bool]]:
     """Build a flat list of (unit, is_vowel, word_idx, is_word_start) for the line.
 
@@ -229,7 +237,7 @@ def _build_line_units(
     """
     line_units: list[tuple[str, bool, int, bool]] = []
     for word_idx, word in enumerate(words):
-        units = _tokenize_word(word)
+        units = _tokenize_word(word, lexicon=lexicon)
         for i, (unit, is_v) in enumerate(units):
             is_word_start = (i == 0)
             line_units.append((unit, is_v, word_idx, is_word_start))
@@ -265,8 +273,8 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
             atoms=(), bridges=(), sites=(),
         )
 
-    # Build flat unit list
-    line_units = _build_line_units(words)
+    # Build flat unit list — pass lexicon for dictionary-driven consonantal-u
+    line_units = _build_line_units(words, lexicon=lexicon)
 
     # Pass 1: identify vowel positions and extract atoms
     atoms: list[VocalicAtom] = []

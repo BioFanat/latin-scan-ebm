@@ -94,13 +94,16 @@ class VowelLengthLexicon:
     ) -> None:
         self._mqdq: dict[str, dict[str, dict[str, int]]] = {}
         self._morpheus: dict[str, list[PhonWeight | None]] = {}
+        # Raw Morpheus forms keyed by normalized word — preserves v/j marks
+        # for consonantal-u/i detection.
+        self._morpheus_raw: dict[str, set[str]] = {}
 
         if mqdq_path and mqdq_path.exists():
             with open(mqdq_path) as f:
                 self._mqdq = json.load(f)
 
         if morpheus_path and morpheus_path.exists():
-            self._morpheus = self._load_morpheus(morpheus_path)
+            self._morpheus, self._morpheus_raw = self._load_morpheus(morpheus_path)
 
     @staticmethod
     def _normalize_key(word: str) -> str:
@@ -108,14 +111,18 @@ class VowelLengthLexicon:
         return word.lower().replace("v", "u").replace("j", "i")
 
     @staticmethod
-    def _load_morpheus(path: Path) -> dict[str, list[PhonWeight | None]]:
+    def _load_morpheus(
+        path: Path,
+    ) -> tuple[dict[str, list[PhonWeight | None]], dict[str, set[str]]]:
         """Load Morpheus macron data.
 
         Format: word_form  morph_tag  lemma  macronized_form
         Where _ = long, ^ = short after each vowel.
-        Keys are normalized: v→u, j→i.
+        Keys are normalized: v→u, j→i, BUT raw forms preserve v/j for
+        consonantal-detection.
         """
         result: dict[str, list[PhonWeight | None]] = {}
+        raw_forms: dict[str, set[str]] = {}
         with open(path) as f:
             for line in f:
                 parts = line.strip().split("\t")
@@ -125,7 +132,44 @@ class VowelLengthLexicon:
                 macro_form = parts[3]
                 if word_form not in result:
                     result[word_form] = _parse_macron_form(macro_form.lower())
-        return result
+                raw_forms.setdefault(word_form, set()).add(macro_form.lower())
+        return result, raw_forms
+
+    def is_consonantal_u(self, word: str, position: int) -> bool:
+        """True iff ALL Morpheus forms for `word` agree that the character
+        at `position` is 'v' (consonantal). Conservative — if even one form
+        has 'u' (vocalic) at this position, return False.
+
+        `position` is the 0-indexed offset in the atomizer's spelling (u/i
+        used for both vowel and consonant). Returns False for unknown words.
+        """
+        key = self._normalize_key(word)
+        forms = self._morpheus_raw.get(key, ())
+        if not forms:
+            return False
+        all_v = True
+        any_evidence = False
+        for form in forms:
+            clean = form.replace("_", "").replace("^", "").replace("*", "")
+            clean = clean.replace("[", "").replace("]", "")
+            if position >= len(clean):
+                # alignment skew — be conservative
+                all_v = False
+                continue
+            ch = clean[position]
+            if ch == "v":
+                any_evidence = True
+            elif ch == "u":
+                all_v = False
+            else:
+                # different character at this position — alignment skew
+                all_v = False
+        return all_v and any_evidence
+
+    def is_known_form(self, word: str) -> bool:
+        """True if the word has any entry in either Morpheus or MQDQ."""
+        key = self._normalize_key(word)
+        return key in self._morpheus or key in self._mqdq
 
     def lookup(
         self,
