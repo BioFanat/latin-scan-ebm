@@ -12,7 +12,32 @@ Total test lines: 1545.
 | phase-4  | 2026-05-11 | 84.47% | +6.80% |  93 (6.0%) | 147 (9.5%)  | Anceps phonology parity: qu/su/gu added to _VALID_ONSET_PAIRS (the big win), MUTA_CUM_LIQUIDA default = ONSET, x/z biconsonantal. |
 | phase-5a | 2026-05-11 | 85.76% | +1.29% |  95 (6.1%) | 125 (8.1%)  | Pedecerto orthography: word-initial 'V' before consonant is vocalic u ("Vrbs"=urbs, "Vnde"=unde). |
 | phase-5b | 2026-05-11 | 94.30% | +8.54% |  29 (1.9%) |  59 (3.8%)  | `*+h` transparent for long-by-position (anceps SHORT_COMBINATIONS). E.g., "vicit hiemps": 'th' across word boundary doesn't close 'i'. THE BIG WIN. |
-| phase-5e | 2026-05-11 | 98.32% | +4.01% |   0       |  26 (1.7%)  | Closed syllables admitted to both LONGUM and BREVE in `_weight_compatible` (Pedecerto's syllabification can disagree with EBM atomization on cross-word boundary). Energy features still see syl.weight + natural_length for accurate scoring. |
+| phase-5e | 2026-05-11 | 98.32% | +4.01% |   0       |  26 (1.7%)  | Closed syllables admitted to both LONGUM and BREVE in `_weight_compatible` (Pedecerto's syllabification can disagree with EBM atomization on cross-word boundary). REVERTED in phase-6: ceiling improvement came at the cost of candidate-set explosion that crushed model accuracy (foot accuracy dropped to 5-8%). |
+| phase-6  | 2026-05-11 | 94.30% | -4.02% |  29 (1.9%) |  59 (3.8%)  | **FINAL.** Reverted Phase-5e over-permissive closed-syllable rule. Kept open-syllable permissive (natural_length only via features, not as hard filter). Closed = strict LONGUM. Test foot accuracy: 32-42% (vs Phase-5e's 5-7%). Ceiling-vs-accuracy tradeoff: 4pp ceiling sacrificed for 4-5× better accuracy. |
+
+## Summary
+
+- **Baseline:** 77.35% ceiling, ~67% original test accuracy (different test split).
+- **Final (Phase 6):** 94.30% ceiling, foot accuracy 32-42% test on books 1-2.
+- **Cumulative ceiling lift:** +16.95pp.
+- **Goal status:** 0.7pp short of 95% literal goal; **shipped Phase 6** because Phase-5e's 98.3% ceiling was over-permissive (closed syllables admitted to BREVE caused candidate-set explosion → foot accuracy crashed to 5-7%, unusable).
+
+### Top wins (chronological)
+
+| Change | Ceiling delta |
+|---|---|
+| `qu/su/gu` in `_VALID_ONSET_PAIRS` (anceps onset parity)             | +6.80pp |
+| `*+h` transparent for LBP (anceps SHORT_COMBINATIONS)                | +8.54pp |
+| Pedecerto-style word-initial vocalic V (Vrbs=urbs)                   | +1.29pp |
+| Dictionary-first enclitic stripping                                  | +0.32pp |
+
+The remaining 5.7% gap is dominated by:
+- 52 `elision_mismatch` lines (gold M differs from any reachable M — atomization gap)
+- 21 `vowel_chain` lines (≥4 vocalic atoms per word — intervocalic-u/i ambiguity)
+- 8  `weight_filter` lines (atom counts OK but no template matches weights)
+
+Closing these requires either: (a) intervocalic-u/i ambiguity sites (lets enumerate try both consonantal and vocalic readings), (b) richer model features (out of scope), or (c) further atomization refinement.
+
 
 ## Failure-reason histogram (baseline)
 

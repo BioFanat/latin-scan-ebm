@@ -51,27 +51,29 @@ def _weight_compatible(
     if slot == MetricalSlot.ANCEPS:
         return True
 
-    # Diphthong nucleus → always LONG (unless correption-shortened, where
-    # realize sets syl.weight=SHORT and we then permit BREVE).
-    is_diphthong = (
-        len(syl.atom_indices) >= 2
-        and all(
-            line.atoms[i].in_diphthong
-            for i in syl.atom_indices
-            if i < len(line.atoms)
+    # Open non-diphthong syllable → permissive on both LONGUM and BREVE.
+    # Rationale: lexicon-derived natural_length is unreliable as a hard
+    # filter (MQDQ conflates natural+positional, Morpheus has alignment
+    # gaps). Treat it as feature evidence (visible via syl.weight) rather
+    # than a hard constraint. The energy model learns to disambiguate.
+    if syl.is_open:
+        is_diphthong = (
+            len(syl.atom_indices) >= 2
+            and all(
+                line.atoms[i].in_diphthong
+                for i in syl.atom_indices
+                if i < len(line.atoms)
+            )
         )
-    )
-    if is_diphthong:
-        if syl.weight == PhonWeight.LONG:
-            return slot == MetricalSlot.LONGUM
-        return slot == MetricalSlot.BREVE  # correption-shortened
+        if not is_diphthong:
+            return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
 
-    # All non-diphthong syllables — open OR closed — are admissible to both
-    # slots. Closed syllables may be re-syllabified across word boundaries
-    # (single coda consonant can move to onset of next word's syllable),
-    # so a closed syllable being SHORT is a valid Pedecerto outcome.
-    # The energy function uses syl.weight as a feature to bias scoring.
-    return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
+    # Diphthong nucleus or closed syllable: trust syl.weight strictly.
+    if slot == MetricalSlot.LONGUM:
+        return syl.weight == PhonWeight.LONG
+    if slot == MetricalSlot.BREVE:
+        return syl.weight == PhonWeight.SHORT
+    return False
 
 
 def _find_word_boundaries(line: LatinLine, active_atoms: list[bool]) -> list[int]:
