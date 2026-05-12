@@ -51,31 +51,27 @@ def _weight_compatible(
     if slot == MetricalSlot.ANCEPS:
         return True
 
-    # Open syllable with no hard length signal (no diphthong, no known
-    # natural length) → ambiguous, admit both LONGUM and BREVE. The
-    # energy function disambiguates via features over natural_length.
-    if syl.is_open:
-        is_diphthong = (
-            len(syl.atom_indices) >= 2
-            and all(
-                line.atoms[i].in_diphthong
-                for i in syl.atom_indices
-                if i < len(line.atoms)
-            )
+    # Diphthong nucleus → always LONG (unless correption-shortened, where
+    # realize sets syl.weight=SHORT and we then permit BREVE).
+    is_diphthong = (
+        len(syl.atom_indices) >= 2
+        and all(
+            line.atoms[i].in_diphthong
+            for i in syl.atom_indices
+            if i < len(line.atoms)
         )
-        if not is_diphthong:
-            # Permissive: do NOT filter on natural_length. MQDQ conflates
-            # natural with positional length, and Morpheus has alignment
-            # gaps — hard-filtering on either drops the ceiling.
-            return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
+    )
+    if is_diphthong:
+        if syl.weight == PhonWeight.LONG:
+            return slot == MetricalSlot.LONGUM
+        return slot == MetricalSlot.BREVE  # correption-shortened
 
-    # Certain weight (diphthong nucleus, closed syllable, or correption):
-    # check syl.weight strictly. realize.py is the source of truth here.
-    if slot == MetricalSlot.LONGUM:
-        return syl.weight == PhonWeight.LONG
-    if slot == MetricalSlot.BREVE:
-        return syl.weight == PhonWeight.SHORT
-    return False
+    # All non-diphthong syllables — open OR closed — are admissible to both
+    # slots. Closed syllables may be re-syllabified across word boundaries
+    # (single coda consonant can move to onset of next word's syllable),
+    # so a closed syllable being SHORT is a valid Pedecerto outcome.
+    # The energy function uses syl.weight as a feature to bias scoring.
+    return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
 
 
 def _find_word_boundaries(line: LatinLine, active_atoms: list[bool]) -> list[int]:
