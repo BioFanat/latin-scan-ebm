@@ -144,19 +144,48 @@ _NO_STRIP = frozenset({
 })
 
 
-def _strip_enclitic(word: str) -> tuple[str, str | None]:
+def _strip_enclitic(
+    word: str,
+    lexicon: VowelLengthLexicon | None = None,
+) -> tuple[str, str | None]:
     """Strip a Latin enclitic suffix from a word.
 
     Returns (stem, enclitic) or (word, None) if no enclitic found.
-    Only strips if the stem has at least 2 characters and the word
-    is not in the exception list.
+
+    Strategy (when lexicon provided): only split if the whole word is
+    NOT in any dictionary and the stripped stem IS. This covers
+    arbitrary -que/-ne/-ve compounds (rare/late-Latin) without needing
+    a hardcoded exception list.
+
+    Falls back to the legacy hardcoded `_NO_STRIP` list when no lexicon
+    is given (lets unit tests work without dictionary data).
     """
-    if word in _NO_STRIP:
+    if not (
+        (len(word) > 4 and word[-3:] in _ENCLITICS_3)
+        or (len(word) > 3 and word[-2:] in _ENCLITICS_2)
+    ):
         return word, None
-    if len(word) > 4 and word[-3:] in _ENCLITICS_3:
-        return word[:-3], word[-3:]
-    if len(word) > 3 and word[-2:] in _ENCLITICS_2:
+
+    if lexicon is None:
+        # Legacy fallback: hardcoded exception list
+        if word in _NO_STRIP:
+            return word, None
+        if len(word) > 4 and word[-3:] in _ENCLITICS_3:
+            return word[:-3], word[-3:]
         return word[:-2], word[-2:]
+
+    # Dictionary-driven: don't split if whole word is known
+    if lexicon.is_known_form(word):
+        return word, None
+
+    enc_len = 3 if word[-3:] in _ENCLITICS_3 else 2
+    stem = word[:-enc_len]
+    enc = word[-enc_len:]
+
+    # Only split if the stem is a known word — otherwise stripping is
+    # likely wrong (treat as opaque word and let realize/enumerate cope).
+    if lexicon.is_known_form(stem):
+        return stem, enc
     return word, None
 
 
@@ -261,7 +290,7 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
     # Expand enclitics: "uirumque" → "uirum", "que"
     expanded: list[str] = []
     for w in raw_words:
-        stem, enclitic = _strip_enclitic(w)
+        stem, enclitic = _strip_enclitic(w, lexicon=lexicon)
         expanded.append(stem)
         if enclitic is not None:
             expanded.append(enclitic)
