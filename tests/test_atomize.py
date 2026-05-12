@@ -167,8 +167,10 @@ class TestFullLine:
         # Just verify basic structural invariants
         assert len(line.atoms) > 0
         assert len(line.bridges) == len(line.atoms) - 1
-        assert len(line.words) == 8
-        assert line.normalized == "arma uirumque cano troiae qui primus ab oris"
+        # "uirumque" splits into "uirum" + "que" (enclitic)
+        assert len(line.words) == 9
+        assert "uirum" in line.words
+        assert "que" in line.words
 
     def test_atom_word_idx_consistency(self):
         """Every atom's word_idx should index a valid word."""

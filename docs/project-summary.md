@@ -91,32 +91,43 @@ Training on ~6K lines (8K minus skipped) with 129 features takes ~2 minutes on a
 
 | Model | Foot Pattern Acc | Syllable Acc | Elision F1 | Diphthong F1 | MCL F1 |
 |-------|-----------------|-------------|-----------|-------------|--------|
-| **EBM v1 + lexicon features** | **66.9%** | **86.3%** | **0.861** | — | — |
+| **Anceps** (constraint-based) | **92.0%** | — | — | — | — |
+| **EBM v1 final** (lex + phon fixes) | **67.3%** | **86.3%** | **0.730** | — | — |
+| EBM v1 + lexicon features | 66.9% | 86.3% | 0.861 | — | — |
 | EBM v1 (no lexicon) | 63.6% | 84.9% | 0.867 | 0.604 | 0.920 |
 | CRF (gold syllabification) | 36.4% | 86.1% | — | — | — |
 | Default baseline | 39.7% | 75.8% | 0.825 | 0.000 | 0.935 |
 | Random baseline | 30.3% | 70.7% | 0.704 | 0.232 | 0.513 |
 
+### Improvement Progression
+
+| Step | Foot Acc | Ceiling (gold reachable) | Change |
+|------|---------|-------------------------|--------|
+| Original v1 | 63.6% | 74.1% | baseline |
+| + MQDQ lexicon as features | 66.9% | 74.1% | +3.3pp |
+| + enclitic stripping + post-g u | 67.3% | 75.0% | +0.4pp |
+| Anceps (target) | 92.0% | ~99% | — |
+
 ### Diagnostic: Why Not Higher?
 
 Analysis of the test set (books 1-2) reveals the accuracy bottleneck:
 
-| Category | Lines | % |
-|----------|-------|---|
-| Correct prediction | 891 | 57.7% |
-| Wrong prediction (gold reachable) | 302 | 19.5% |
-| Gold not in candidate set | 202 | 13.1% |
-| No candidates at all | 150 | 9.7% |
+| Category | Lines | % | After fixes |
+|----------|-------|---|-------------|
+| Correct prediction | 891 | 57.7% | — |
+| Wrong prediction (gold reachable) | 302 | 19.5% | — |
+| Gold not in candidate set | 202 | 13.1% | 12.7% |
+| No candidates at all | 150 | 9.7% | 12.3% |
 
 **Ceiling analysis (books 11-12 as test):**
-- 74.1% of test lines have the gold parse in the candidate set
-- The model achieves 74.5% accuracy on those reachable lines
-- Performance at 90.3% of the achievable ceiling
+- After phonology fixes: **75.0%** of test lines have the gold parse in the candidate set (up from 74.1%)
+- The model achieves ~90% accuracy on reachable lines
+- Candidate set size reduced from mean 28.9 to 17.8 (tighter search)
 
 The bottleneck is **data quality**, not model architecture:
-- **9.7% no candidates**: Syllable count outside [12,17] for all decision bundles. Root cause: atomization errors (consonantal u/v edge cases, enclitic handling, complex vowel sequences like "Lauiniaque").
-- **13.1% gold unreachable**: Candidates exist but gold weight pattern doesn't match. Root cause: without natural vowel length data, the realizer can't distinguish genuinely long vowels from short ones in open syllables.
-- **19.5% wrong prediction**: Gold is reachable but the model picks the wrong candidate. Root cause: insufficient features to disambiguate — many candidates differ only in vowel quantities for open syllables, and the model lacks the phonological knowledge to choose correctly.
+- **~12% no candidates**: Syllable count outside [12,17] for all decision bundles. Root cause: atomization errors — complex vowel sequences (e.g., "Lauiniaque" with 5 consecutive vowels), words with contested consonantal/vocalic status, and remaining enclitic edge cases.
+- **~13% gold unreachable**: Candidates exist but gold weight pattern doesn't match. Root cause: without natural vowel length data, the realizer can't distinguish genuinely long vowels from short ones in open syllables. The MQDQ dictionary conflates natural and positional length and can't be used as a hard constraint.
+- **~20% wrong prediction**: Gold is reachable but the model picks the wrong candidate. Root cause: 129 sparse linear features aren't expressive enough to disambiguate candidates that differ only in open-syllable weights. This is where the v2 MLP would help.
 
 ### Anceps Comparison: The Phonology Gap
 
@@ -183,7 +194,26 @@ Morpheus gives natural length but has vowel-count mismatches with our atomizer (
 
 **Problem:** MQDQ uses 'u' for both vowel-u and consonant-v. Words like "uirumque" (= virumque) had the initial 'u' treated as a vowel, creating a false 'ui' diphthong and wrong atom count.
 
-**Fix:** Added `_is_consonantal_u()` heuristic in `atomize.py`: word-initial 'u' before a vowel is treated as consonantal. This mirrors the existing `_is_consonantal_i()` heuristic. Reduced atom count from 17 to 16 for the canonical first line.
+**Fix:** Added `_is_consonantal_u()` heuristic in `atomize.py`, ported from anceps (Allen & Greenough rules):
+- Word-initial 'u' before a vowel → consonantal (e.g., "uirumque" → v-irumque)
+- After 'g' before a vowel → consonantal (e.g., "lingua" → l-i-ng-v-a)
+- Intervocalic 'u' before vowel → **disabled** after testing. Too aggressive — words like "suus", "tuus", "deus" have genuinely vocalic intervocalic 'u'. Needs a dictionary-informed approach or exception list.
+
+### Enclitic Stripping
+
+**Problem:** Compound words like "uirumque", "Lauiniaque", "Inferretque" weren't in the MQDQ dictionary because it stores stems and enclitics separately.
+
+**Fix:** Added `_strip_enclitic()` in `atomize.py` that splits `-que`, `-ne`, `-ve`, `-ue` from word stems before tokenization. The stem and enclitic are processed as separate words.
+
+**Critical complication:** Many Latin words end in `-que` but are NOT stem+enclitic — "neque", "atque", "quoque", "usque", "undique", "denique", "itaque", etc. Required an exception list (`_NO_STRIP`) of ~25 indivisible words. Without this, enclitic stripping broke more lines than it fixed.
+
+**Result:** Ceiling improved from 74.1% → 75.0% gold-in-candidate-set. Modest but real.
+
+### Lexicon Key Normalization
+
+**Problem:** The Morpheus dictionary and our atomizer use different orthographic conventions. Morpheus keys might use 'v' where we use 'u', or 'j' where we use 'i'. Lookups failed silently.
+
+**Fix:** Added `_normalize_key()` in `lexicon.py` that maps v→u, j→i before dictionary lookup, matching anceps's convention. Applied to both Morpheus loading and all lookup methods.
 
 ### Diphthong Detection Fix
 
@@ -203,19 +233,25 @@ Morpheus gives natural length but has vowel-count mismatches with our atomizer (
 
 ### 1. Natural Vowel Length Data (the biggest gap)
 
-The single largest improvement would come from a reliable source of **natural** (not metrical) vowel lengths. Neither MQDQ (metrical) nor Morpheus (alignment issues) works well as a hard constraint. Options:
+The single largest improvement would come from a reliable source of **natural** (not metrical) vowel lengths. We tried both available dictionaries as hard constraints and neither worked:
 
-- **Build a natural-length lexicon** by post-processing MQDQ: if a vowel is long in open syllables and long in closed syllables, it's naturally long. If it's long only in closed syllables, it's naturally short (long by position only). This deconfounding requires per-vowel-per-syllable-structure statistics that could be computed from the MQDQ data.
-- **Use Morpheus with better alignment**: fix the vowel-count mismatch by matching on character identity rather than position. The `lookup_aligned` method exists but needs refinement for edge cases (qu, consonantal i/j, diphthongs).
-- **Train a separate vowel-length classifier**: use the MQDQ data to learn natural length from word form + morphological context, then use its predictions as features.
+- **MQDQ dictionary**: Gives metrical length (how the vowel was scanned in context), not natural length. A naturally short vowel in a closed syllable appears as "long." Using it as a hard constraint dropped gold-in-candidate-set from 74.1% to 62.9%. With per-vowel consensus (85% threshold) it was 67.9%. With character-aligned lookup it was 66.5%. All worse than no lexicon.
+- **Morpheus dictionary**: Gives natural length but has vowel-count mismatches with our atomizer (counts `qu` as two vowels, doesn't handle consonantal i/j the same way). Fixed with key normalization (v→u, j→i) and character-aligned matching, but still imperfect.
+- **MQDQ as features**: Using MQDQ agreement/disagreement ratios as training features (soft evidence) gave +3.3pp. This is the right approach — let the model learn how much to trust the lexicon.
 
-### 2. Atomization Edge Cases (9.7% no-candidates)
+**Remaining options:**
+- **Deconfound MQDQ**: Compute natural length by comparing a vowel's scansion in open vs. closed syllable contexts across the corpus. A vowel that's long in open syllables is naturally long; one that's long only when closed is naturally short.
+- **Use anceps as a front-end**: Run anceps's constraint solver to get word-level scansions, then use those as features or constraints for our EBM. This would essentially give us anceps's 92% as a starting point and let the EBM learn on top.
+- **Train a vowel-length classifier**: Predict natural length from word form + morphological features using the MQDQ corpus as (noisy) supervision.
 
-Lines producing zero candidates have atomization problems:
+### 2. Atomization Edge Cases (~12% no-candidates)
 
-- **Enclitic handling**: Words like "Lauiniaque" need the `-que` enclitic stripped before lexicon lookup. The atomizer doesn't currently handle enclitics.
-- **Complex vowel sequences**: "Lauiniaque" has 5 consecutive vowels (a-u-i-i-a) after consonantal analysis. The correct syllabification depends on knowing that the second 'i' is consonantal — which our heuristic doesn't catch because it's not word-initial or intervocalic in the standard sense.
-- **u/v in non-initial positions**: The consonantal-u heuristic only fires word-initially. Medial consonantal-u (as in "soluit" = solvit) is not handled.
+Enclitic stripping and consonantal-u improvements reduced this from 13.1% but it remains significant. Remaining issues:
+
+- **Complex vowel sequences**: Words like "Lauiniaque" (even after enclitic stripping → "Lauinia") have multiple consecutive vowels where consonantal/vocalic status depends on morphological knowledge, not just position.
+- **Intervocalic u/v**: We disabled the intervocalic consonantal-u heuristic because it was too aggressive — "suus", "tuus", "deus" have genuinely vocalic intervocalic 'u'. A dictionary-informed approach is needed: the dictionary knows that "nouam" → "novam" but "deus" → "deus".
+- **Enclitic exception coverage**: Our exception list (`_NO_STRIP`) covers ~25 common words, but rare or late-Latin words ending in -que/-ne/-ve may be incorrectly split. Needs expansion or a dictionary check.
+- **Greek proper names**: Words like "Achilli", "Ganymedis" have non-standard phonology that our Latin-tuned heuristics don't handle.
 
 ### 3. Feature Richness (19.5% wrong predictions on reachable lines)
 
@@ -238,10 +274,11 @@ The 129 features capture foot patterns and caesura well but lack:
 
 ### Near-term (v1 improvements)
 
-1. **Deconfound MQDQ vowel lengths**: Compute natural-vs-positional length from the MQDQ data by comparing vowel scansions in open vs. closed syllable contexts. Use deconfounded lengths as a hard constraint.
-2. **Enclitic stripping**: Handle -que, -ne, -ue, -ce in the atomizer and lexicon lookup.
-3. **Richer features**: Per-position weight indicators, word-form features, morphological features from CLTK.
-4. **More training data**: Add Ovid, Lucretius, and other authors from Pedecerto. Test cross-author transfer.
+1. **Use anceps as a front-end**: Run anceps's constraint solver to produce word-level scansion candidates, then use those as features or constraints for the EBM. This bridges the 25pp gap by leveraging anceps's mature phonology while keeping the EBM's learning capacity. The architectures are complementary: anceps provides hard phonological knowledge, the EBM provides learned soft preferences.
+2. **Deconfound MQDQ vowel lengths**: Compute natural-vs-positional length from the MQDQ data by comparing vowel scansions across syllable contexts. Use deconfounded lengths as hard constraints.
+3. **Dictionary-informed consonantal u/v**: Instead of heuristics, look up each word in the dictionary to determine which 'u's are consonantal. This is what anceps does — the dictionary resolves ambiguity, not rules.
+4. **Richer features**: Per-position weight indicators, word-form features, morphological features from CLTK.
+5. **More training data**: Add Ovid, Lucretius, and other authors from Pedecerto. Test cross-author transfer.
 
 ### Medium-term (v2: MLP + enrichment)
 
