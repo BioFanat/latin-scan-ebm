@@ -29,21 +29,32 @@ def _weight_compatible(
 ) -> bool:
     """Check if a syllable weight satisfies a metrical slot requirement.
 
-    If the syllable is open and none of its constituent atoms have a
-    known natural length, the weight is uncertain — treat as compatible
-    with any slot. The energy function will learn the correct assignment.
+    Design philosophy: this is the CANDIDATE-SET MEMBERSHIP filter, not
+    the scoring function. We are permissive for ambiguous cases (open
+    syllables) and let the EBM's features over `atom.natural_length`
+    learn to prefer the correct weight assignment from the candidate set.
+
+    Hard constraints retained (these would never be "wrong" to enforce):
+      - Closed syllable → LONG by position
+      - Diphthong nucleus → LONG (unless under correption, where realize
+        already sets weight=SHORT, allowing BREVE here)
+
+    Open-syllable ambiguity:
+      - Treated as length-unknown for filtering purposes, regardless of
+        what `atom.natural_length` claims. Both LONGUM and BREVE admit.
+      - Rationale: natural_length data conflates natural with positional
+        length (MQDQ) or has alignment gaps (Morpheus). Hard-filtering
+        on it drops the ceiling without commensurate accuracy gain.
+        The realized weight (in syl.weight) still reflects natural_length
+        and is visible to the energy features.
     """
     if slot == MetricalSlot.ANCEPS:
         return True
 
-    # Check if weight is uncertain: open syllable with unknown vowel length
+    # Open syllable with no hard length signal (no diphthong, no known
+    # natural length) → ambiguous, admit both LONGUM and BREVE. The
+    # energy function disambiguates via features over natural_length.
     if syl.is_open:
-        length_known = any(
-            line.atoms[i].natural_length is not None
-            for i in syl.atom_indices
-            if i < len(line.atoms)
-        )
-        # Also certain if it's a diphthong nucleus (always long)
         is_diphthong = (
             len(syl.atom_indices) >= 2
             and all(
@@ -52,10 +63,14 @@ def _weight_compatible(
                 if i < len(line.atoms)
             )
         )
-        if not length_known and not is_diphthong:
-            return True  # uncertain → compatible with anything
+        if not is_diphthong:
+            # Permissive: do NOT filter on natural_length. MQDQ conflates
+            # natural with positional length, and Morpheus has alignment
+            # gaps — hard-filtering on either drops the ceiling.
+            return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
 
-    # Certain weight: check normally
+    # Certain weight (diphthong nucleus, closed syllable, or correption):
+    # check syl.weight strictly. realize.py is the source of truth here.
     if slot == MetricalSlot.LONGUM:
         return syl.weight == PhonWeight.LONG
     if slot == MetricalSlot.BREVE:

@@ -232,15 +232,10 @@ class VowelLengthLexicon:
         """
         key = self._normalize_key(word)
 
-        # Get the best macronized form
-        if key in self._mqdq:
-            best_form = self._get_best_mqdq_form(key, author)
-            if best_form:
-                return self._align_to_atoms(best_form, atom_vowels)
-
+        # Morpheus first — theory-based natural lengths (preferred for this purpose).
+        # MQDQ conflates natural with positional length and over-constrains as
+        # a hard signal; using it as fallback only.
         if key in self._morpheus:
-            # Morpheus doesn't give us the raw form, just parsed lengths.
-            # Fall back to positional alignment.
             lengths = self._morpheus[key]
             result: list[PhonWeight | None] = []
             for i in range(len(atom_vowels)):
@@ -249,6 +244,12 @@ class VowelLengthLexicon:
                 else:
                     result.append(None)
             return result
+
+        # MQDQ fallback for words not in Morpheus
+        if key in self._mqdq:
+            best_form = self._get_best_mqdq_form(key, author)
+            if best_form:
+                return self._align_to_atoms(best_form, atom_vowels)
 
         return [None] * len(atom_vowels)
 

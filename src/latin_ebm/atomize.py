@@ -20,6 +20,7 @@ from latin_ebm.types import (
     AmbiguitySite,
     ConsonantBridge,
     LatinLine,
+    PhonWeight,
     SiteChoice,
     SiteType,
     VocalicAtom,
@@ -306,6 +307,19 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
                 diphthong_info[atom_idx] = (True, "first")
                 diphthong_info[atom_idx + 1] = (True, "second")
 
+    # If lexicon provided, compute natural_length per word using character-aligned lookup.
+    natural_lengths: list[PhonWeight | None] = [None] * len(vowel_unit_indices)
+    if lexicon is not None:
+        by_word: dict[int, list[int]] = {}
+        for atom_idx, unit_idx in enumerate(vowel_unit_indices):
+            _, _, w_idx, _ = line_units[unit_idx]
+            by_word.setdefault(w_idx, []).append(atom_idx)
+        for w_idx, idx_list in by_word.items():
+            atom_chars = [line_units[vowel_unit_indices[i]][0] for i in idx_list]
+            lengths = lexicon.lookup_aligned(words[w_idx], atom_chars)
+            for slot, length in zip(idx_list, lengths):
+                natural_lengths[slot] = length
+
     for atom_idx, unit_idx in enumerate(vowel_unit_indices):
         unit, _, word_idx, _ = line_units[unit_idx]
         in_diphthong, diphthong_role = diphthong_info[atom_idx]
@@ -314,7 +328,7 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
             index=atom_idx,
             chars=unit,
             word_idx=word_idx,
-            natural_length=None,
+            natural_length=natural_lengths[atom_idx],
             in_diphthong=in_diphthong,
             diphthong_role=diphthong_role,
             is_word_final=(atom_idx == word_last_vowel.get(word_idx, -1)),
