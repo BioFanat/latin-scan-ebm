@@ -487,8 +487,8 @@ def _detect_sites(
                 index=site_idx,
                 site_type=SiteType.MUTA_CUM_LIQUIDA,
                 atom_indices=(i, i + 1),
-                valid_choices=(SiteChoice.CLOSE, SiteChoice.ONSET),
-                default=SiteChoice.CLOSE,  # default: cluster closes preceding syllable
+                valid_choices=(SiteChoice.ONSET, SiteChoice.CLOSE),
+                default=SiteChoice.ONSET,  # anceps parity: muta+liquida is short by default
             ))
             site_idx += 1
 

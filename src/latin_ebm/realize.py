@@ -35,6 +35,10 @@ for _s2 in STOPS:
 # s + liquid
 for _lq2 in LIQUIDS:
     _VALID_ONSET_PAIRS.add("s" + _lq2)
+# u-as-v digraphs (qu/su/gu): the u is consonantal, the whole 2-char
+# unit stays as onset and does NOT close the preceding syllable.
+# Mirrors anceps's SHORT_COMBINATIONS (utils.py:17, Allen & Greenough 11.c.3).
+_VALID_ONSET_PAIRS.update({"qu", "su", "gu"})
 
 
 def _max_onset_split(consonants: str) -> tuple[str, str]:
@@ -43,14 +47,32 @@ def _max_onset_split(consonants: str) -> tuple[str, str]:
     Assigns as many consonants as possible to the onset of the following
     syllable, subject to the constraint that the onset must be a valid
     Latin onset cluster.
+
+    Special case: x and z are biconsonantal (= ks, dz). They can never
+    appear in an onset — they always belong to the coda of the preceding
+    syllable, closing it. (Anceps utils.py:23 lists them as DOUBLE_CONSONANTS.)
     """
     if not consonants:
         return ("", "")
 
-    # Try taking all consonants as onset, then progressively fewer
-    for i in range(len(consonants)):
-        onset = consonants[i:]
-        coda = consonants[:i]
+    # Find the rightmost x or z — anything up to and including it must
+    # go to the coda. Onset can only contain consonants after it.
+    last_biconsonantal = -1
+    for i, ch in enumerate(consonants):
+        if ch in "xz":
+            last_biconsonantal = i
+    onset_search_start = last_biconsonantal + 1
+    coda_forced = consonants[:onset_search_start]
+    onset_search = consonants[onset_search_start:]
+
+    if not onset_search:
+        # No room for an onset — everything is forced coda
+        return (consonants, "")
+
+    # Try taking all remaining consonants as onset, then progressively fewer
+    for i in range(len(onset_search)):
+        onset = onset_search[i:]
+        coda = coda_forced + onset_search[:i]
 
         if len(onset) == 1:
             return (coda, onset)
