@@ -78,11 +78,11 @@ def _is_consonantal_i(word: str, pos: int) -> bool:
 def _is_consonantal_u(word: str, pos: int) -> bool:
     """Heuristic: is 'u' at position `pos` in `word` consonantal (= v)?
 
-    MQDQ uses 'u' for both vowel-u and consonant-v. Rules (deterministic, v1):
-    - Word-initial 'u' before a vowel → consonantal (v)
-    - After 'q' is already handled by the 'qu' digraph rule
-    - Intervocalic 'u' between two vowels → consonantal in some words,
-      but this is less reliable than for 'i'. For v1: only word-initial.
+    Ported from anceps (word.py:235-242, Allen & Greenough):
+    - After q before a vowel → consonantal (handled by 'qu' digraph)
+    - After g before a vowel → consonantal (e.g., "lingua")
+    - Word-initial u before a vowel → consonantal (e.g., "uirumque")
+    - Intervocalic u before a vowel → consonantal (e.g., "nouam", "soluit")
     """
     if word[pos] != "u":
         return False
@@ -95,11 +95,60 @@ def _is_consonantal_u(word: str, pos: int) -> bool:
     if not has_vowel_after:
         return False
 
+    # After 'g' before vowel → consonantal (gu + vowel, e.g., "lingua")
+    if pos > 0 and word[pos - 1] == "g":
+        return True
+
     # Word-initial u before vowel → consonantal (= v)
     if pos == 0:
         return True
 
+    # Intervocalic u: disabled for now — too aggressive.
+    # Words like "suus", "tuus" have vocalic u that this would break.
+    # TODO: needs an exception list or dictionary-informed approach.
+
     return False
+
+
+# ---------------------------------------------------------------------------
+# Enclitic stripping
+# ---------------------------------------------------------------------------
+
+# Enclitics that are stripped before tokenization.
+# The enclitic itself is processed as a separate mini-word.
+_ENCLITICS_3 = ("que",)   # 3-letter enclitics
+_ENCLITICS_2 = ("ne", "ue", "ve")  # 2-letter enclitics
+
+# Words ending in -que/-ne/-ve that are NOT stem+enclitic.
+# These are indivisible words where the ending is part of the stem.
+_NO_STRIP = frozenset({
+    # -que words (conjunctions, adverbs, etc.)
+    "neque", "atque", "quoque", "usque", "undique", "ubique",
+    "cumque", "namque", "absque", "denique", "itaque", "utrique",
+    "plerumque", "plerique", "quisque", "quandoque", "quacumque",
+    "quicumque", "quodcumque", "ubicumque", "qualiscumque",
+    "quantumcumque", "quotcumque", "utcumque", "sicque",
+    # -ne words
+    "omne", "bene", "sane",
+    # -ve words
+    # (most -ve words are genuinely stem+enclitic)
+})
+
+
+def _strip_enclitic(word: str) -> tuple[str, str | None]:
+    """Strip a Latin enclitic suffix from a word.
+
+    Returns (stem, enclitic) or (word, None) if no enclitic found.
+    Only strips if the stem has at least 2 characters and the word
+    is not in the exception list.
+    """
+    if word in _NO_STRIP:
+        return word, None
+    if len(word) > 4 and word[-3:] in _ENCLITICS_3:
+        return word[:-3], word[-3:]
+    if len(word) > 3 and word[-2:] in _ENCLITICS_2:
+        return word[:-2], word[-2:]
+    return word, None
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +247,16 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
     6. If lexicon provided, populate natural_length on atoms
     """
     normalized = normalize(raw)
-    words = tuple(normalized.split())
+    raw_words = normalized.split()
+
+    # Expand enclitics: "uirumque" → "uirum", "que"
+    expanded: list[str] = []
+    for w in raw_words:
+        stem, enclitic = _strip_enclitic(w)
+        expanded.append(stem)
+        if enclitic is not None:
+            expanded.append(enclitic)
+    words = tuple(expanded)
 
     if not words:
         return LatinLine(

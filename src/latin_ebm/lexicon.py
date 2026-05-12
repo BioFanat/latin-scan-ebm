@@ -103,11 +103,17 @@ class VowelLengthLexicon:
             self._morpheus = self._load_morpheus(morpheus_path)
 
     @staticmethod
+    def _normalize_key(word: str) -> str:
+        """Normalize a word for dictionary lookup: v→u, j→i, lowercase."""
+        return word.lower().replace("v", "u").replace("j", "i")
+
+    @staticmethod
     def _load_morpheus(path: Path) -> dict[str, list[PhonWeight | None]]:
         """Load Morpheus macron data.
 
         Format: word_form  morph_tag  lemma  macronized_form
         Where _ = long, ^ = short after each vowel.
+        Keys are normalized: v→u, j→i.
         """
         result: dict[str, list[PhonWeight | None]] = {}
         with open(path) as f:
@@ -115,7 +121,7 @@ class VowelLengthLexicon:
                 parts = line.strip().split("\t")
                 if len(parts) < 4:
                     continue
-                word_form = parts[0].lower()
+                word_form = VowelLengthLexicon._normalize_key(parts[0])
                 macro_form = parts[3]
                 if word_form not in result:
                     result[word_form] = _parse_macron_form(macro_form.lower())
@@ -134,15 +140,15 @@ class VowelLengthLexicon:
         Uses MQDQ majority vote across attestations.
         Falls back to Morpheus if MQDQ has no entry.
         """
-        word_lower = word.lower()
+        key = self._normalize_key(word)
 
         # Try MQDQ first
-        if word_lower in self._mqdq:
-            return self._lookup_mqdq(word_lower, author)
+        if key in self._mqdq:
+            return self._lookup_mqdq(key, author)
 
         # Fallback to Morpheus
-        if word_lower in self._morpheus:
-            return self._morpheus[word_lower]
+        if key in self._morpheus:
+            return self._morpheus[key]
 
         return None
 
@@ -224,18 +230,18 @@ class VowelLengthLexicon:
 
         Returns one PhonWeight per atom_vowel entry.
         """
-        word_lower = word.lower()
+        key = self._normalize_key(word)
 
         # Get the best macronized form
-        if word_lower in self._mqdq:
-            best_form = self._get_best_mqdq_form(word_lower, author)
+        if key in self._mqdq:
+            best_form = self._get_best_mqdq_form(key, author)
             if best_form:
                 return self._align_to_atoms(best_form, atom_vowels)
 
-        if word_lower in self._morpheus:
+        if key in self._morpheus:
             # Morpheus doesn't give us the raw form, just parsed lengths.
             # Fall back to positional alignment.
-            lengths = self._morpheus[word_lower]
+            lengths = self._morpheus[key]
             result: list[PhonWeight | None] = []
             for i in range(len(atom_vowels)):
                 if i < len(lengths):
