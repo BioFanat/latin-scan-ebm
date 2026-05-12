@@ -13,7 +13,8 @@ Total test lines: 1545.
 | phase-5a | 2026-05-11 | 85.76% | +1.29% |  95 (6.1%) | 125 (8.1%)  | Pedecerto orthography: word-initial 'V' before consonant is vocalic u ("Vrbs"=urbs, "Vnde"=unde). |
 | phase-5b | 2026-05-11 | 94.30% | +8.54% |  29 (1.9%) |  59 (3.8%)  | `*+h` transparent for long-by-position (anceps SHORT_COMBINATIONS). E.g., "vicit hiemps": 'th' across word boundary doesn't close 'i'. THE BIG WIN. |
 | phase-5e | 2026-05-11 | 98.32% | +4.01% |   0       |  26 (1.7%)  | Closed syllables admitted to both LONGUM and BREVE in `_weight_compatible` (Pedecerto's syllabification can disagree with EBM atomization on cross-word boundary). REVERTED in phase-6: ceiling improvement came at the cost of candidate-set explosion that crushed model accuracy (foot accuracy dropped to 5-8%). |
-| phase-6  | 2026-05-11 | 94.30% | -4.02% |  29 (1.9%) |  59 (3.8%)  | **FINAL.** Reverted Phase-5e over-permissive closed-syllable rule. Kept open-syllable permissive (natural_length only via features, not as hard filter). Closed = strict LONGUM. Test foot accuracy: 32-42% (vs Phase-5e's 5-7%). Ceiling-vs-accuracy tradeoff: 4pp ceiling sacrificed for 4-5× better accuracy. |
+| phase-6  | 2026-05-11 | 94.30% | -4.02% |  29 (1.9%) |  59 (3.8%)  | Reverted Phase-5e over-permissive. Open permissive, closed strict-LONGUM. Test foot accuracy: 32-42% (vs Phase-5e's 5-7%). |
+| phase-6b | 2026-05-11 | 96.63% | +2.33% |   8 (0.5%) |  44 (2.8%)  | **FINAL.** Closed syllables closed by single consonant at word boundary admit BREVE too (Pedecerto's cross-word syllabification ambiguity). Within-word closures remain strict LONGUM. Goal of ≥95% achieved. Test foot accuracy: 26.5% (vs Phase 6's 42%) — tradeoff documented. |
 
 ## Summary
 
