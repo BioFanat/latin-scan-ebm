@@ -68,17 +68,7 @@ def _weight_compatible(
         if not is_diphthong:
             return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
 
-    # Closed syllable closed by exactly one consonant at a word boundary:
-    # Pedecerto sometimes syllabifies the consonant as onset of next word's
-    # first syllable instead of coda of current. Admit BREVE for these.
-    # (Within-word closures remain strict LONGUM by position.)
-    if not syl.is_open and len(syl.coda) == 1 and syl.atom_indices:
-        last_atom_idx = max(syl.atom_indices)
-        if (last_atom_idx < len(line.bridges)
-                and line.bridges[last_atom_idx].has_word_boundary):
-            return slot in (MetricalSlot.LONGUM, MetricalSlot.BREVE)
-
-    # Diphthong nucleus or within-word closed syllable: trust syl.weight strictly.
+    # Diphthong nucleus or closed syllable: trust syl.weight strictly.
     if slot == MetricalSlot.LONGUM:
         return syl.weight == PhonWeight.LONG
     if slot == MetricalSlot.BREVE:
