@@ -204,7 +204,20 @@ def _tokenize_word(
     treats x/z as single units (their double-consonant effect is
     tracked separately). `lexicon` enables dictionary-driven
     intervocalic consonantal-u detection.
+
+    Pedecerto orthography note: a leading 'v' followed by consonant(s)
+    represents VOCALIC u (e.g., "Vrbs" = urbs, 1 syllable). This is
+    handled here by checking the word has no other vowels.
     """
+    # Pedecerto orthography: word-initial 'V' before a consonant is the
+    # vocalic u (e.g., "Vrbs"=urbs, "Vnde"=unde). Word-initial 'V' before
+    # a vowel is the consonantal v (e.g., "Vir"=vir).
+    word_initial_v_is_vowel = (
+        len(word) > 1
+        and word[0] == "v"
+        and not _is_vowel(word[1])
+    )
+
     units: list[tuple[str, bool]] = []
     i = 0
     while i < len(word):
@@ -228,6 +241,12 @@ def _tokenize_word(
 
         if _is_consonantal_u(word, i, lexicon):
             units.append((ch, False))
+            i += 1
+            continue
+
+        # Word-initial 'v' before consonant — vocalic (Pedecerto convention)
+        if i == 0 and word_initial_v_is_vowel:
+            units.append(("u", True))  # treat as vocalic u
             i += 1
             continue
 
@@ -381,23 +400,32 @@ def atomize(raw: str, lexicon: VowelLengthLexicon | None = None) -> LatinLine:
 
         cons_units: list[str] = []
         has_word_boundary = False
+        word_boundary_char_pos = 0
+        char_cursor = 0
 
         for j in range(start, end):
             unit, _, _, is_word_start = line_units[j]
-            if is_word_start:
+            if is_word_start and not has_word_boundary:
+                # First word-boundary marker in this bridge — record split point
                 has_word_boundary = True
+                word_boundary_char_pos = char_cursor
             cons_units.append(unit)
+            char_cursor += len(unit)
 
         # Also check if the atom after the bridge starts a new word
         _, _, next_word_idx, next_is_word_start = line_units[vowel_unit_indices[i + 1]]
         if next_is_word_start and atoms[i].word_idx != next_word_idx:
-            has_word_boundary = True
+            if not has_word_boundary:
+                # All bridge consonants belong to the LEFT word (vowel-initial next word)
+                has_word_boundary = True
+                word_boundary_char_pos = char_cursor
 
         cons_str = "".join(cons_units)
         bridges.append(ConsonantBridge(
             chars=cons_str,
             has_word_boundary=has_word_boundary,
             is_muta_cum_liquida=_has_mcl(cons_str),
+            word_boundary_pos=word_boundary_char_pos if has_word_boundary else 0,
         ))
 
     # Pass 3: detect ambiguity sites

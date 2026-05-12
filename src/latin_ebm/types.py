@@ -123,11 +123,17 @@ class ConsonantBridge:
 
     bridges[i] sits between atoms[i] and atoms[i+1], so
     len(bridges) == len(atoms) - 1.
+
+    `word_boundary_pos` (when has_word_boundary): index into `chars` where
+    the boundary falls. chars[:word_boundary_pos] belongs to the LEFT
+    word (potential coda of left syllable), chars[word_boundary_pos:]
+    belongs to the RIGHT word (potential onset of right syllable).
     """
 
     chars: str                # consonant characters (may be empty for hiatus)
     has_word_boundary: bool   # a word boundary (#) falls within this bridge
     is_muta_cum_liquida: bool # a stop+liquid cluster is present
+    word_boundary_pos: int = 0  # split point in chars (only meaningful if has_word_boundary)
 
 
 @dataclass(frozen=True)

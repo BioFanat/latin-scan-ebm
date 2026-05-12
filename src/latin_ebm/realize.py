@@ -39,6 +39,11 @@ for _lq2 in LIQUIDS:
 # unit stays as onset and does NOT close the preceding syllable.
 # Mirrors anceps's SHORT_COMBINATIONS (utils.py:17, Allen & Greenough 11.c.3).
 _VALID_ONSET_PAIRS.update({"qu", "su", "gu"})
+# Any consonant + h is transparent for LBP — anceps SHORT_COMBINATIONS:
+# 'h' doesn't make the preceding consonant a closing cluster. e.g.,
+# "vicit hiemps" has 'th' across word boundary and 't' should not close 'i'.
+for _c in "bpdtcgfjlmnrsqvkz":
+    _VALID_ONSET_PAIRS.add(_c + "h")
 
 
 def _max_onset_split(consonants: str) -> tuple[str, str]:
