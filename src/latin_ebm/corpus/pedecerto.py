@@ -415,6 +415,13 @@ def parse_line_element(
     # Atomize the raw text (our representation)
     line = atomize(raw_text, lexicon=lexicon)
 
+    # Preserve the punctuation-bearing source text in document order BEFORE
+    # atomize strips it. In this corpus punctuation rides in separate <word>
+    # elements (no `sy`), e.g. "·" or ","; keeping them lets rhetorical probes
+    # locate mid-line sense pauses. (atomize lowercases/strips, so line.raw and
+    # line.words cannot recover this.)
+    line.source_text = " ".join(w.text.strip() for w in words if w.text and w.text.strip())
+
     # Attach metadata
     line.author = author
     line.work = title

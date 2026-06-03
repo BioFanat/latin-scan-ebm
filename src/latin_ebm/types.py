@@ -176,6 +176,11 @@ class LatinLine:
     line_num: int = 0
     corpus_id: str = ""
 
+    # Punctuation-bearing source text in document order, preserved verbatim
+    # from the corpus before atomization strips punctuation. Used by rhetorical
+    # probes (e.g. sense-pause position); empty when not supplied by ingestion.
+    source_text: str = ""
+
 
 # ---------------------------------------------------------------------------
 # Output structures — one per candidate parse, varying over Y(x)

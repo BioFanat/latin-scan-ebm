@@ -97,13 +97,14 @@ class VowelLengthLexicon:
         # Raw Morpheus forms keyed by normalized word — preserves v/j marks
         # for consonantal-u/i detection.
         self._morpheus_raw: dict[str, set[str]] = {}
+        self._word_to_lemma: dict[str, str] = {}
 
         if mqdq_path and mqdq_path.exists():
             with open(mqdq_path) as f:
                 self._mqdq = json.load(f)
 
         if morpheus_path and morpheus_path.exists():
-            self._morpheus, self._morpheus_raw = self._load_morpheus(morpheus_path)
+            self._morpheus, self._morpheus_raw, self._word_to_lemma = self._load_morpheus(morpheus_path)
 
     @staticmethod
     def _normalize_key(word: str) -> str:
@@ -113,7 +114,7 @@ class VowelLengthLexicon:
     @staticmethod
     def _load_morpheus(
         path: Path,
-    ) -> tuple[dict[str, list[PhonWeight | None]], dict[str, set[str]]]:
+    ) -> tuple[dict[str, list[PhonWeight | None]], dict[str, set[str]], dict[str, str]]:
         """Load Morpheus macron data.
 
         Format: word_form  morph_tag  lemma  macronized_form
@@ -123,17 +124,24 @@ class VowelLengthLexicon:
         """
         result: dict[str, list[PhonWeight | None]] = {}
         raw_forms: dict[str, set[str]] = {}
+        word_to_lemma: dict[str, str] = {}
         with open(path) as f:
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) < 4:
                     continue
                 word_form = VowelLengthLexicon._normalize_key(parts[0])
+                lemma = VowelLengthLexicon._normalize_key(parts[2])
                 macro_form = parts[3]
                 if word_form not in result:
                     result[word_form] = _parse_macron_form(macro_form.lower())
                 raw_forms.setdefault(word_form, set()).add(macro_form.lower())
-        return result, raw_forms
+                word_to_lemma.setdefault(word_form, lemma)
+        return result, raw_forms, word_to_lemma
+
+    def lemma(self, word: str) -> str | None:
+        """Look up the Morpheus lemma for a word form, or None if unknown."""
+        return self._word_to_lemma.get(self._normalize_key(word))
 
     def is_consonantal_u(self, word: str, position: int) -> bool:
         """True iff ALL Morpheus forms for `word` agree that the character

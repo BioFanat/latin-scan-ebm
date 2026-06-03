@@ -179,3 +179,26 @@ def sample_training_example(sample_line, sample_parse) -> TrainingExample:
         line=sample_line,
         gold_parse=sample_parse,
     )
+
+
+# ---------------------------------------------------------------------------
+# Real-corpus fixture for the metrical-encoder Stage 0 end-to-end scorer test.
+# Parses the Aeneid and returns the first line that enumerates >= 2 candidates.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def real_aeneid_line():
+    """First enumerable Aeneid line for end-to-end scorer tests."""
+    from pathlib import Path
+    from latin_ebm.corpus.pedecerto import parse_xml
+    from latin_ebm.enumerate import enumerate_parses
+    from latin_ebm.lexicon import VowelLengthLexicon
+    lexicon = VowelLengthLexicon(
+        Path("data/MqDqMacrons.json"), Path("data/MorpheusMacrons.txt")
+    )
+    result = parse_xml(Path("pedecerto-raw/VERG-aene.xml"), lexicon=lexicon)
+    for ex in result.examples:
+        if len(enumerate_parses(ex.line)) >= 2:
+            return ex.line, ex.gold_parse
+    raise RuntimeError("no enumerable line found")

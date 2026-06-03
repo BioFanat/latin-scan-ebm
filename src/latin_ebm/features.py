@@ -20,12 +20,46 @@ from latin_ebm.types import (
     FootType,
     LatinLine,
     Parse,
+    PhonWeight,
     SiteChoice,
     SiteType,
 )
 
 if TYPE_CHECKING:
     from latin_ebm.lexicon import VowelLengthLexicon
+
+
+# Optional allowlist for lemma features (set to None = allow all; set to a frozenset
+# of allowed lemmas to gate). Used to reduce feature-index blowup.
+_LEMMA_ALLOWLIST: frozenset[str] | None = None
+
+
+def set_lemma_allowlist(allowlist: frozenset[str] | None) -> None:
+    """Set the allowlist used to gate lemma features."""
+    global _LEMMA_ALLOWLIST
+    _LEMMA_ALLOWLIST = allowlist
+
+
+def _syllable_index_for_atom(parse: Parse, atom_idx: int) -> int | None:
+    """Find which realized syllable contains the given atom_idx (or None)."""
+    for syl_idx, syl in enumerate(parse.syllables):
+        if atom_idx in syl.atom_indices:
+            return syl_idx
+    return None
+
+
+def _foot_for_syllable(parse: Parse, syl_idx: int | None) -> int | None:
+    """Which foot contains syllable syl_idx (0..n_feet-1) or None."""
+    if syl_idx is None:
+        return None
+    bnds = parse.foot_boundaries
+    n_feet = len(parse.foot_types)
+    for foot_idx in range(n_feet):
+        start = bnds[foot_idx]
+        end = bnds[foot_idx + 1] if foot_idx + 1 < len(bnds) else len(parse.syllables)
+        if start <= syl_idx < end:
+            return foot_idx
+    return None
 
 
 class FeatureIndex:
@@ -95,6 +129,86 @@ def extract_features(
             left_atom = line.atoms[site.atom_indices[0]]
             features[f"site_vowel:{left_atom.chars}:{decision.name}"] += 1.0
 
+        # --- Phase B/C/D: contextual site features ---
+        n_atoms = len(line.atoms)
+        if site.site_type == SiteType.ELISION and len(site.atom_indices) >= 2:
+            li, ri = site.atom_indices[0], site.atom_indices[1]
+            la = line.atoms[li]
+            ra = line.atoms[ri]
+            pair = la.chars + ra.chars
+            features[f"elision_pair:{pair}:{decision.name}"] += 1.0
+
+            # bridge between the two atoms tells us about coda + nasal-m pattern
+            if 0 <= li < len(line.bridges):
+                bridge = line.bridges[li]
+                # nasal-m elision (final m before vowel) vs pure vowel hiatus
+                has_m = "m" in bridge.chars.lower()
+                features[f"elision_has_m:{int(has_m)}:{decision.name}"] += 1.0
+
+            # which word follows? prodelision sensitive to e/es/est
+            if ra.word_idx < len(line.words):
+                right_word = line.words[ra.word_idx].lower()
+                if right_word in ("es", "est"):
+                    features[f"elision_right_es:{decision.name}"] += 1.0
+
+            # which foot does the elision fall in?
+            syl_idx_el = _syllable_index_for_atom(parse, li)
+            foot_el = _foot_for_syllable(parse, syl_idx_el)
+            if foot_el is not None:
+                features[f"elision_in_foot:{foot_el}:{decision.name}"] += 1.0
+
+            # left word ending pattern (last 2 chars of left word)
+            if la.word_idx < len(line.words):
+                lw = line.words[la.word_idx].lower()
+                if len(lw) >= 2:
+                    features[f"elision_lw_end:{lw[-2:]}:{decision.name}"] += 1.0
+
+        elif site.site_type == SiteType.SYNIZESIS and len(site.atom_indices) >= 2:
+            li, ri = site.atom_indices[0], site.atom_indices[1]
+            pair = line.atoms[li].chars + line.atoms[ri].chars
+            features[f"synizesis_pair:{pair}:{decision.name}"] += 1.0
+            syl_idx_s = _syllable_index_for_atom(parse, li)
+            foot_s = _foot_for_syllable(parse, syl_idx_s)
+            if foot_s is not None:
+                features[f"synizesis_in_foot:{foot_s}:{decision.name}"] += 1.0
+
+        elif site.site_type == SiteType.DIPHTHONG_SPLIT and len(site.atom_indices) >= 2:
+            li, ri = site.atom_indices[0], site.atom_indices[1]
+            pair = line.atoms[li].chars + line.atoms[ri].chars
+            features[f"diphthong_pair:{pair}:{decision.name}"] += 1.0
+            syl_idx_d = _syllable_index_for_atom(parse, li)
+            foot_d = _foot_for_syllable(parse, syl_idx_d)
+            if foot_d is not None:
+                features[f"diphthong_in_foot:{foot_d}:{decision.name}"] += 1.0
+
+        elif site.site_type == SiteType.MUTA_CUM_LIQUIDA and site.atom_indices:
+            li = site.atom_indices[0]
+            if 0 <= li < len(line.bridges):
+                bridge = line.bridges[li].chars.lower()
+                for stop in "bpdtcgf":
+                    for liquid in "lr":
+                        if stop + liquid in bridge:
+                            features[f"mcl_cluster:{stop+liquid}:{decision.name}"] += 1.0
+                            break
+            syl_idx_m = _syllable_index_for_atom(parse, li)
+            foot_m = _foot_for_syllable(parse, syl_idx_m)
+            if foot_m is not None:
+                features[f"mcl_in_foot:{foot_m}:{decision.name}"] += 1.0
+
+        elif site.site_type == SiteType.PRODELISION and len(site.atom_indices) >= 2:
+            li, ri = site.atom_indices[0], site.atom_indices[1]
+            pair = line.atoms[li].chars + line.atoms[ri].chars
+            features[f"prodelision_pair:{pair}:{decision.name}"] += 1.0
+
+        # Lemma-conditional site feature (gated via _LEMMA_ALLOWLIST when set)
+        if lexicon is not None and site.atom_indices:
+            la = line.atoms[site.atom_indices[0]]
+            if la.word_idx < len(line.words):
+                lem = lexicon.lemma(line.words[la.word_idx])
+                if lem is not None and len(lem) >= 2:
+                    if _LEMMA_ALLOWLIST is None or lem in _LEMMA_ALLOWLIST:
+                        features[f"lemma:{lem}:{site.site_type.name}:{decision.name}"] += 1.0
+
     # --- Global features ---
 
     # Fifth foot type
@@ -137,6 +251,24 @@ def extract_features(
         for ft in parse.foot_types
     )
     features[f"pattern:{pattern}"] = 1.0
+
+    # --- Phase B: per-syllable weight × position ---
+    for syl_idx, syl in enumerate(parse.syllables):
+        features[f"syl_pos:{syl_idx}:{syl.weight.name}"] += 1.0
+
+    # --- Phase B: foot bigrams ---
+    for i in range(len(parse.foot_types) - 1):
+        ft1 = parse.foot_types[i].name
+        ft2 = parse.foot_types[i + 1].name
+        features[f"foot_bigram:{i}:{ft1}_{ft2}"] += 1.0
+
+    # --- Phase B: per-foot foot-type features (feet 0..4) ---
+    for i, ft in enumerate(parse.foot_types[:5]):
+        features[f"foot:{i}:{ft.name}"] += 1.0
+
+    # --- Phase B: author-conditioning (cheap; helps if multi-author) ---
+    if line.author:
+        features[f"author:{line.author}"] = 1.0
 
     # --- Lexicon features (MQDQ word-level scansion priors) ---
     if lexicon is not None:
